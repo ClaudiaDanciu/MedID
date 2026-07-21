@@ -1,4 +1,8 @@
 
+import { callClaude } from './claude';
+import { buildHealthSystemPrompt } from './healthContext';
+import { loadLogEntries } from './storage';
+
 export interface AICommand {
   command: string;
   description: string;
@@ -93,15 +97,22 @@ export const aiCommands: AICommand[] = [
     usage: '/log I have a headache and feeling tired',
     handler: async (args: string) => {
       const extracted = extractHealthData(args);
+
+      let suggestions = ['Would you like to add any triggers?', 'Any medications taken today?', 'How long have you felt this way?'];
+      try {
+        const systemPrompt = buildHealthSystemPrompt(
+          'You are a health logging assistant. Given a symptom report, return exactly 3 brief follow-up questions as a JSON array of strings. Return ONLY the JSON array, no other text.'
+        );
+        const raw = await callClaude([{ role: 'user', content: args }], systemPrompt, 256);
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) suggestions = parsed;
+      } catch { /* use defaults */ }
+
       return {
         type: 'log',
-        content: `Logged: ${extracted.symptoms.join(', ')} | Mood: ${extracted.mood}/10 | Severity: ${extracted.severity}/10`,
+        content: `Logged: ${extracted.symptoms.length > 0 ? extracted.symptoms.join(', ') : 'health note'} | Mood: ${extracted.mood}/10 | Severity: ${extracted.severity}/10`,
         data: extracted,
-        suggestions: [
-          'Would you like to add any triggers?',
-          'Any medications taken today?',
-          'How long have you felt this way?'
-        ]
+        suggestions,
       };
     }
   },
@@ -110,14 +121,19 @@ export const aiCommands: AICommand[] = [
     description: 'Analyze recent health patterns',
     usage: '/analyze my mood patterns this week',
     handler: async (args: string) => {
+      const recentLogs = loadLogEntries().slice(0, 20);
+      const systemPrompt = buildHealthSystemPrompt(
+        'You are a precise health analysis assistant. Analyze the user health data and provide 2-3 specific pattern insights in plain text. Be concise and actionable.'
+      );
+      const context = recentLogs.length > 0
+        ? `Recent health logs:\n${JSON.stringify(recentLogs, null, 2)}\n\nUser request: ${args}`
+        : `User has no health logs yet. Request: ${args}`;
+
+      const content = await callClaude([{ role: 'user', content: context }], systemPrompt, 512);
       return {
         type: 'analyze',
-        content: 'Analysis: Your headaches occur 3x after lunch meals. Energy levels peak in the morning. Mood correlates with sleep quality.',
-        suggestions: [
-          'Consider food allergy testing',
-          'Try eating smaller lunch portions',
-          'Monitor sleep schedule more closely'
-        ]
+        content,
+        suggestions: ['Log more entries for better insights', 'Check the Insights tab for detailed analysis'],
       };
     }
   },
@@ -126,14 +142,14 @@ export const aiCommands: AICommand[] = [
     description: 'Get personalized health coaching',
     usage: '/coach me on evening routine',
     handler: async (args: string) => {
+      const systemPrompt = buildHealthSystemPrompt(
+        'You are a health coach. Give 4 specific, actionable recommendations for the topic the user asks about. Keep it concise and practical.'
+      );
+      const content = await callClaude([{ role: 'user', content: args }], systemPrompt, 512);
       return {
         type: 'coach',
-        content: 'Evening Routine Recommendations:\n1. Wind down 1 hour before bed\n2. Avoid screens 30 minutes before sleep\n3. Try gentle stretching or meditation\n4. Keep bedroom temperature cool (65-68°F)',
-        suggestions: [
-          'Set a consistent bedtime',
-          'Create a relaxing pre-sleep ritual',
-          'Track sleep quality for patterns'
-        ]
+        content,
+        suggestions: ['Set a consistent routine', 'Track your progress', 'Review next week'],
       };
     }
   },
@@ -142,14 +158,14 @@ export const aiCommands: AICommand[] = [
     description: 'Create meal or activity plans',
     usage: '/plan my meals for this week',
     handler: async (args: string) => {
+      const systemPrompt = buildHealthSystemPrompt(
+        'You are a health planning assistant. Create a practical plan based on the user request. ALWAYS check medications and allergies before making food or supplement recommendations. Keep it concise.'
+      );
+      const content = await callClaude([{ role: 'user', content: args }], systemPrompt, 768);
       return {
         type: 'plan',
-        content: 'Weekly Meal Plan (based on your health profile):\n\nMonday: Grilled salmon, quinoa, steamed broccoli\nTuesday: Chicken stir-fry with vegetables\nWednesday: Lentil soup with whole grain bread\nThursday: Baked cod with sweet potato\nFriday: Turkey and avocado wrap\n\nAll meals avoid your allergens and support your health goals.',
-        suggestions: [
-          'Would you like recipes for any of these meals?',
-          'Need grocery shopping list?',
-          'Want to modify any days?'
-        ]
+        content,
+        suggestions: ['Want recipes for any of these?', 'Need a grocery list?', 'Modify any days?'],
       };
     }
   }

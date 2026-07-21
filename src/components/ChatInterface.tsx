@@ -5,18 +5,21 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
-import { 
-  Send, 
-  Mic, 
-  MicOff, 
-  Sparkles, 
-  Activity, 
-  Brain, 
+import {
+  Send,
+  Mic,
+  MicOff,
+  Sparkles,
+  Activity,
+  Brain,
   Heart,
   Plus,
   Command
 } from 'lucide-react';
 import { parseCommand, executeCommand, AICommandResult, extractHealthData } from '@/utils/aiCommands';
+import { callClaude, handleClaudeError } from '@/utils/claude';
+import { buildHealthSystemPrompt } from '@/utils/healthContext';
+import { loadChatHistory, saveChatHistory } from '@/utils/storage';
 
 interface ChatMessage {
   id: string;
@@ -34,23 +37,25 @@ const quickActions = [
   { label: "Plan meals", command: "/plan", icon: Plus },
 ];
 
-const samplePrompts = [
-  "I have a headache after lunch",
-  "Feeling anxious today",
-  "Track my mood - feeling great!",
-  "Help me plan healthy meals"
-];
+const WELCOME_MESSAGE: ChatMessage = {
+  id: '1',
+  type: 'ai',
+  content: "Hi! I'm your AI health companion. You can chat with me naturally about your symptoms, mood, or health goals. Try saying something like 'I have a headache' or use commands like /analyze.",
+  timestamp: new Date(),
+  suggestions: [
+    "I have a headache after lunch",
+    "Feeling anxious today",
+    "Track my mood - feeling great!",
+    "Help me plan healthy meals"
+  ]
+};
 
 export const ChatInterface = () => {
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: '1',
-      type: 'ai',
-      content: "Hi! I'm your AI health companion. You can chat with me naturally about your symptoms, mood, or health goals. Try saying something like 'I have a headache' or use commands like /analyze.",
-      timestamp: new Date(),
-      suggestions: samplePrompts
-    }
-  ]);
+  const [messages, setMessages] = useState<ChatMessage[]>(() => {
+    const stored = loadChatHistory();
+    if (stored.length === 0) return [WELCOME_MESSAGE];
+    return stored.map(m => ({ ...m, timestamp: new Date(m.timestamp as string) }));
+  });
   const [inputValue, setInputValue] = useState('');
   const [isListening, setIsListening] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
@@ -66,6 +71,10 @@ export const ChatInterface = () => {
     scrollToBottom();
   }, [messages]);
 
+  useEffect(() => {
+    saveChatHistory(messages.map(m => ({ ...m, timestamp: m.timestamp.toISOString() })));
+  }, [messages]);
+
   const handleSendMessage = async () => {
     if (!inputValue.trim()) return;
 
@@ -76,17 +85,16 @@ export const ChatInterface = () => {
       timestamp: new Date()
     };
 
+    const currentInput = inputValue;
     setMessages(prev => [...prev, userMessage]);
     setInputValue('');
     setIsTyping(true);
 
-    // Simulate AI typing delay
-    setTimeout(async () => {
-      const parsedCommand = parseCommand(inputValue);
+    try {
+      const parsedCommand = parseCommand(currentInput);
       let aiResponse: ChatMessage;
 
       if (parsedCommand.isCommand && parsedCommand.command && parsedCommand.args) {
-        // Handle AI command
         const result = await executeCommand(parsedCommand.command, parsedCommand.args);
         aiResponse = {
           id: (Date.now() + 1).toString(),
@@ -97,26 +105,38 @@ export const ChatInterface = () => {
           suggestions: result.suggestions
         };
       } else {
-        // Natural language processing
-        const extracted = extractHealthData(inputValue);
+        const systemPrompt = buildHealthSystemPrompt(
+          'You are SYMPA+, a compassionate AI health companion. Help users track symptoms, understand health patterns, and make healthy choices. Keep responses under 150 words. If a symptom sounds medically serious, gently suggest seeking professional care.'
+        );
+
+        const history = messages
+          .filter(m => m.type !== 'system')
+          .slice(-10)
+          .map(m => ({
+            role: (m.type === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
+            content: m.content
+          }));
+        history.push({ role: 'user', content: currentInput });
+
+        const responseText = await callClaude(history, systemPrompt, 512);
+        const extracted = extractHealthData(currentInput);
+
         aiResponse = {
           id: (Date.now() + 1).toString(),
           type: 'ai',
-          content: `I've logged that for you! I detected: ${extracted.symptoms.length > 0 ? extracted.symptoms.join(', ') : 'general health note'} with mood level ${extracted.mood}/10. ${extracted.context ? `Context: ${extracted.context}.` : ''} Is there anything else you'd like to track?`,
+          content: responseText,
           timestamp: new Date(),
-          data: extracted,
-          suggestions: [
-            "Tell me more about your symptoms",
-            "How long have you felt this way?",
-            "Any triggers you can think of?",
-            "Track another symptom"
-          ]
+          data: extracted.symptoms.length > 0 ? extracted : undefined,
+          suggestions: []
         };
       }
 
-      setIsTyping(false);
       setMessages(prev => [...prev, aiResponse]);
-    }, 1000);
+    } catch (error) {
+      handleClaudeError(error, toast);
+    } finally {
+      setIsTyping(false);
+    }
   };
 
   const handleQuickAction = (command: string) => {
@@ -194,7 +214,7 @@ export const ChatInterface = () => {
                   : 'bg-white border border-gray-200 rounded-r-2xl rounded-tl-2xl'
               } p-4 shadow-sm`}
             >
-              <p className="whitespace-pre-line">{message.content}</p>
+              <p className="whitespace-pre-line break-words">{message.content}</p>
               
               {message.data && (
                 <div className="mt-3 space-y-2">

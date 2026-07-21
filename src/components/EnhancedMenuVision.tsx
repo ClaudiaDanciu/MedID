@@ -7,6 +7,8 @@ import { useToast } from '@/hooks/use-toast';
 import { Camera, Upload, CheckCircle, AlertCircle, XCircle, Loader2, FileText, Zap } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { Camera as CapacitorCamera, CameraResultType, CameraSource } from '@capacitor/camera';
+import { callClaude, prepareImageForClaude, handleClaudeError } from '@/utils/claude';
+import { buildHealthSystemPrompt } from '@/utils/healthContext';
 
 interface MenuItem {
   name: string;
@@ -80,86 +82,61 @@ export const EnhancedMenuVision = () => {
 
   const analyzeMenuPage = async (imageData: string) => {
     setIsAnalyzing(true);
-    setAnalysisProgress(0);
-    
-    // Simulate progressive analysis
-    const progressSteps = [
-      { step: 20, message: "Scanning menu text..." },
-      { step: 50, message: "Extracting dish information..." },
-      { step: 70, message: "Analyzing ingredients..." },
-      { step: 90, message: "Checking health profile..." },
-      { step: 100, message: "Generating recommendations..." }
-    ];
+    setAnalysisProgress(10);
 
-    for (const { step, message } of progressSteps) {
-      setAnalysisProgress(step);
+    try {
+      const systemPrompt = buildHealthSystemPrompt(
+        `You are MenuVision, a food safety AI. Analyze the menu image and return a JSON array of menu items you can identify.
+Each item must have this exact shape:
+{ "name": string, "description": string, "ingredients": string[], "nutrition": { "calories": number, "carbs": number, "protein": number, "fat": number }, "recommendation": "recommended"|"caution"|"avoid", "reason": string, "interactions": string[]|null, "alternatives": string[]|null, "confidence": number }
+CRITICAL: Cross-reference every ingredient against the patient's ALLERGIES list. Any item containing an allergen must be "avoid" with a clear interaction warning.
+If you cannot see menu items clearly, return a best-effort array based on what you can see.
+Return ONLY a valid JSON array. No other text.`
+      );
+
+      setAnalysisProgress(30);
+
+      const imageBlock = prepareImageForClaude(imageData);
+      const raw = await callClaude(
+        [{
+          role: 'user',
+          content: [
+            imageBlock,
+            { type: 'text', text: 'Analyze this menu image and return the JSON array of menu items as instructed.' }
+          ]
+        }],
+        systemPrompt,
+        2048
+      );
+
+      setAnalysisProgress(90);
+
+      const items: MenuItem[] = JSON.parse(raw);
+      const newPage: MenuPage = {
+        id: Date.now().toString(),
+        image: imageData,
+        items: Array.isArray(items) ? items : [],
+        category: 'Scanned Menu'
+      };
+
+      setMenuPages(prev => [...prev, newPage]);
+      setCurrentPage(menuPages.length);
+      setAnalysisProgress(100);
+
       toast({
-        title: "MenuVision™ Processing",
-        description: message
+        title: "MenuVision™ Analysis Complete",
+        description: `Analyzed ${newPage.items.length} items with health recommendations`
       });
-      await new Promise(resolve => setTimeout(resolve, 800));
-    }
-    
-    // Enhanced mock analysis results with nutrition and interactions
-    const mockItems: MenuItem[] = [
-      {
-        name: "Grilled Atlantic Salmon",
-        description: "Fresh salmon fillet with lemon herb seasoning, served with quinoa pilaf and seasonal vegetables",
-        ingredients: ["salmon", "quinoa", "broccoli", "carrots", "olive oil", "lemon", "herbs"],
-        nutrition: { calories: 520, carbs: 35, protein: 42, fat: 18 },
-        recommendation: "recommended",
-        reason: "Excellent source of omega-3s, supports heart health goals, anti-inflammatory properties",
-        alternatives: ["Try the wild-caught option for better nutrient profile"],
-        confidence: 95
-      },
-      {
-        name: "Caesar Salad with Chicken",
-        description: "Crisp romaine lettuce, grilled chicken breast, parmesan cheese, croutons, classic caesar dressing",
-        ingredients: ["romaine lettuce", "chicken breast", "parmesan", "croutons", "caesar dressing", "anchovies"],
-        nutrition: { calories: 680, carbs: 28, protein: 35, fat: 45 },
-        recommendation: "caution",
-        reason: "High sodium content (1,200mg) may affect blood pressure management",
-        alternatives: ["Ask for dressing on the side", "Request no croutons to reduce sodium"],
-        confidence: 88
-      },
-      {
-        name: "Thai Peanut Noodles",
-        description: "Rice noodles in spicy peanut sauce with vegetables and choice of protein",
-        ingredients: ["rice noodles", "peanuts", "peanut butter", "soy sauce", "vegetables", "chili"],
-        nutrition: { calories: 750, carbs: 85, protein: 28, fat: 32 },
-        recommendation: "avoid",
-        reason: "Contains peanuts - severe allergy risk based on your profile",
-        interactions: ["CRITICAL: Peanut allergy interaction - avoid completely"],
-        confidence: 100
-      },
-      {
-        name: "Mediterranean Quinoa Bowl",
-        description: "Organic quinoa with chickpeas, cucumber, tomatoes, red onion, feta, olive oil dressing",
-        ingredients: ["quinoa", "chickpeas", "cucumber", "tomatoes", "red onion", "feta", "olive oil"],
-        nutrition: { calories: 485, carbs: 58, protein: 18, fat: 16 },
-        recommendation: "recommended",
-        reason: "Anti-inflammatory ingredients, high fiber, supports digestive health goals",
-        alternatives: ["Add avocado for healthy fats", "Request extra vegetables"],
-        confidence: 92
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        toast({ title: "Processing Error", description: "Could not parse menu analysis. Please try again.", variant: "destructive" });
+      } else {
+        handleClaudeError(error, toast);
       }
-    ];
-    
-    const newPage: MenuPage = {
-      id: Date.now().toString(),
-      image: imageData,
-      items: mockItems,
-      category: "Main Dishes"
-    };
-    
-    setMenuPages(prev => [...prev, newPage]);
-    setCurrentPage(menuPages.length);
-    setIsAnalyzing(false);
-    setAnalysisProgress(0);
-    
-    toast({
-      title: "MenuVision™ Analysis Complete",
-      description: `Analyzed ${mockItems.length} items with health recommendations`
-    });
+    } finally {
+      setIsAnalyzing(false);
+      setAnalysisProgress(0);
+    }
   };
 
   const getRecommendationIcon = (recommendation: string) => {

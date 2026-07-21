@@ -5,6 +5,9 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { Brain, TrendingUp, AlertTriangle, Lightbulb, Star, ThumbsUp, ThumbsDown } from 'lucide-react';
+import { callClaude, handleClaudeError } from '@/utils/claude';
+import { buildHealthSystemPrompt } from '@/utils/healthContext';
+import { loadLogEntries, loadTimelineData } from '@/utils/storage';
 
 interface AIInsight {
   id: string;
@@ -24,96 +27,50 @@ export const AIInsightsEngine = () => {
   const { toast } = useToast();
 
   const generateInsights = async () => {
+    const logs = loadLogEntries().slice(0, 30);
+    const timeline = loadTimelineData().slice(-14);
+
+    if (logs.length === 0) {
+      toast({
+        title: "No data yet",
+        description: "Log some health entries first to generate meaningful insights."
+      });
+      return;
+    }
+
     setIsGenerating(true);
-    
-    // Simulate AI processing
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    const newInsights: AIInsight[] = [
-      {
-        id: '1',
-        type: 'pattern',
-        title: 'Post-Lunch Headache Pattern Detected',
-        description: 'AI analysis shows 80% of your headaches occur 2-3 hours after lunch. This suggests a potential food trigger or blood sugar response.',
-        confidence: 87,
-        actionable: true,
-        suggestions: [
-          'Keep a detailed food diary for lunch meals',
-          'Consider smaller, more frequent meals',
-          'Monitor blood sugar levels after eating',
-          'Try eliminating common triggers (dairy, gluten) one at a time'
-        ],
-        evidence: [
-          '8 out of 10 recorded headaches occurred post-lunch',
-          'Timing consistently 2-3 hours after eating',
-          'Severity correlates with meal size'
-        ]
-      },
-      {
-        id: '2',
-        type: 'medical',
-        title: 'Medication Timing Optimization',
-        description: 'Your Lisinopril timing may be affecting your energy levels. Current evening dose coincides with reported fatigue patterns.',
-        confidence: 73,
-        actionable: true,
-        suggestions: [
-          'Discuss with doctor about morning dosing',
-          'Monitor blood pressure at different times',
-          'Track energy levels with medication timing'
-        ],
-        evidence: [
-          'Fatigue reported 3-4 hours after evening dose',
-          'Energy levels higher in mornings before medication',
-          'Pattern consistent over 2 weeks'
-        ]
-      },
-      {
-        id: '3',
-        type: 'lifestyle',
-        title: 'Sleep-Mood Correlation Strong',
-        description: 'Strong positive correlation (r=0.84) between sleep quality and next-day mood. Improving sleep could significantly boost mood stability.',
-        confidence: 91,
-        actionable: true,
-        suggestions: [
-          'Establish consistent bedtime routine',
-          'Limit screens 1 hour before bed',
-          'Consider sleep tracking for optimization',
-          'Create optimal sleep environment (cool, dark, quiet)'
-        ],
-        evidence: [
-          'Mood scores 40% higher after good sleep nights',
-          'Anxiety symptoms decrease with 7+ hours sleep',
-          'Consistent bedtime improves overall patterns'
-        ]
-      },
-      {
-        id: '4',
-        type: 'warning',
-        title: 'Peanut Allergy Risk Assessment',
-        description: 'CRITICAL: MenuVision detected peanut-containing items scanned 3 times. Ensure all restaurant staff are aware of severe allergy.',
-        confidence: 100,
-        actionable: true,
-        suggestions: [
-          'Always inform restaurants of severe peanut allergy',
-          'Carry epinephrine auto-injector',
-          'Double-check all ingredients with kitchen staff',
-          'Consider allergy translation cards for travel'
-        ],
-        evidence: [
-          'Severe peanut allergy in health profile',
-          'Multiple menu scans showing peanut items',
-          'Cross-contamination risk in restaurant settings'
-        ]
+
+    try {
+      const systemPrompt = buildHealthSystemPrompt(
+        `You are a health insights AI. Analyze the provided health log data and return a JSON array of exactly 4 insight objects.
+Each object must have this exact shape:
+{ "id": string, "type": "pattern"|"medical"|"lifestyle"|"warning", "title": string, "description": string, "confidence": number (0-100), "actionable": boolean, "suggestions": string[], "evidence": string[] }
+Return ONLY valid JSON array. No other text before or after.`
+      );
+
+      const dataContext = `Recent health logs (last 30):\n${JSON.stringify(logs, null, 2)}\n\nTimeline data (last 14 days):\n${JSON.stringify(timeline, null, 2)}`;
+
+      const raw = await callClaude(
+        [{ role: 'user', content: `Analyze this health data and return the JSON array:\n${dataContext}` }],
+        systemPrompt,
+        2048
+      );
+
+      const parsed: AIInsight[] = JSON.parse(raw);
+      setInsights(Array.isArray(parsed) ? parsed : []);
+      toast({
+        title: "AI Insights Generated",
+        description: `Found ${parsed.length} personalized health insights`
+      });
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        toast({ title: "Processing Error", description: "Could not parse AI response. Please try again.", variant: "destructive" });
+      } else {
+        handleClaudeError(error, toast);
       }
-    ];
-    
-    setInsights(newInsights);
-    setIsGenerating(false);
-    
-    toast({
-      title: "AI Insights Generated",
-      description: `Found ${newInsights.length} personalized health insights`
-    });
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   const rateInsight = (insightId: string, rating: number) => {

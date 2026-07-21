@@ -8,6 +8,9 @@ import { useToast } from '@/hooks/use-toast';
 import { Activity, Plus, Mic, MicOff, Command, Sparkles } from 'lucide-react';
 import { CommandPalette } from './CommandPalette';
 import { parseCommand, executeCommand, AICommandResult, extractHealthData } from '@/utils/aiCommands';
+import { loadLogEntries, saveLogEntries, appendTimelinePoint } from '@/utils/storage';
+import { callClaude, handleClaudeError } from '@/utils/claude';
+import { buildHealthSystemPrompt } from '@/utils/healthContext';
 
 interface LogEntry {
   id: string;
@@ -22,7 +25,9 @@ interface LogEntry {
 
 export const LogSection = () => {
   const [logText, setLogText] = useState('');
-  const [entries, setEntries] = useState<LogEntry[]>([]);
+  const [entries, setEntries] = useState<LogEntry[]>(() =>
+    loadLogEntries().map(e => ({ ...e, timestamp: new Date(e.timestamp) }))
+  );
   const [isListening, setIsListening] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [lastCommandResult, setLastCommandResult] = useState<AICommandResult | null>(null);
@@ -32,14 +37,12 @@ export const LogSection = () => {
     if (!logText.trim()) return;
 
     const parsedCommand = parseCommand(logText);
-    
+
     if (parsedCommand.isCommand && parsedCommand.command && parsedCommand.args) {
-      // Handle AI command
       const result = await executeCommand(parsedCommand.command, parsedCommand.args);
       setLastCommandResult(result);
-      
+
       if (result.type === 'log' && result.data) {
-        // Create log entry from AI extraction
         const extracted = result.data;
         const newEntry: LogEntry = {
           id: Date.now().toString(),
@@ -51,16 +54,32 @@ export const LogSection = () => {
           context: extracted.context,
           aiInsights: result.suggestions
         };
-        setEntries(prev => [newEntry, ...prev]);
+        const updated = [newEntry, ...entries];
+        setEntries(updated);
+        saveLogEntries(updated.map(e => ({ ...e, timestamp: e.timestamp.toISOString() })));
+        appendTimelinePoint({ ...newEntry, timestamp: newEntry.timestamp.toISOString() });
       }
-      
-      toast({
-        title: "AI Command Executed",
-        description: result.content
-      });
+
+      toast({ title: "AI Command Executed", description: result.content });
     } else {
-      // Regular log entry with AI enhancement
       const extracted = extractHealthData(logText);
+
+      let aiInsights = ['Entry logged successfully', 'Keep tracking to reveal patterns'];
+      try {
+        const systemPrompt = buildHealthSystemPrompt(
+          'You are a health logging assistant. Given a symptom report, return exactly 3 brief follow-up insights or questions as a JSON array of strings. Return ONLY the JSON array, no other text.'
+        );
+        const raw = await callClaude(
+          [{ role: 'user', content: logText }],
+          systemPrompt,
+          256
+        );
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) aiInsights = parsed;
+      } catch (error) {
+        handleClaudeError(error, toast);
+      }
+
       const newEntry: LogEntry = {
         id: Date.now().toString(),
         text: logText,
@@ -69,20 +88,17 @@ export const LogSection = () => {
         mood: extracted.mood,
         severity: extracted.severity,
         context: extracted.context,
-        aiInsights: [
-          'AI detected patterns in your symptoms',
-          'Consider tracking meal timing',
-          'Mood seems correlated with energy levels'
-        ]
+        aiInsights,
       };
 
-      setEntries(prev => [newEntry, ...prev]);
-      toast({
-        title: "Smart Log Entry Added",
-        description: "AI enhanced your entry with insights"
-      });
+      const updated = [newEntry, ...entries];
+      setEntries(updated);
+      saveLogEntries(updated.map(e => ({ ...e, timestamp: e.timestamp.toISOString() })));
+      appendTimelinePoint({ ...newEntry, timestamp: newEntry.timestamp.toISOString() });
+
+      toast({ title: "Smart Log Entry Added", description: "AI enhanced your entry with insights" });
     }
-    
+
     setLogText('');
   };
 

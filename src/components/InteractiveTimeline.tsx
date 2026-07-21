@@ -1,41 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
 import { Calendar, Filter, TrendingUp, AlertCircle, Clock, ZoomIn, ZoomOut } from 'lucide-react';
-
-interface TimelineDataPoint {
-  date: string;
-  symptoms: number;
-  mood: number;
-  energy: number;
-}
-
-const timelineData: TimelineDataPoint[] = [
-  { date: '2024-01-01', symptoms: 3, mood: 7, energy: 6 },
-  { date: '2024-01-08', symptoms: 5, mood: 4, energy: 3 },
-  { date: '2024-01-15', symptoms: 2, mood: 8, energy: 7 },
-  { date: '2024-01-22', symptoms: 4, mood: 6, energy: 5 },
-  { date: '2024-01-29', symptoms: 1, mood: 9, energy: 8 },
-  { date: '2024-02-05', symptoms: 3, mood: 7, energy: 6 },
-  { date: '2024-02-12', symptoms: 5, mood: 4, energy: 3 },
-  { date: '2024-02-19', symptoms: 2, mood: 8, energy: 7 },
-  { date: '2024-02-26', symptoms: 4, mood: 6, energy: 5 },
-  { date: '2024-03-04', symptoms: 1, mood: 9, energy: 8 },
-  { date: '2024-03-11', symptoms: 3, mood: 7, energy: 6 },
-  { date: '2024-03-18', symptoms: 5, mood: 4, energy: 3 },
-  { date: '2024-03-25', symptoms: 2, mood: 8, energy: 7 },
-  { date: '2024-04-01', symptoms: 4, mood: 6, energy: 5 },
-  { date: '2024-04-08', symptoms: 3, mood: 7, energy: 6 },
-  { date: '2024-04-15', symptoms: 5, mood: 4, energy: 3 },
-  { date: '2024-04-22', symptoms: 2, mood: 8, energy: 7 },
-  { date: '2024-04-29', symptoms: 1, mood: 9, energy: 8 },
-  { date: '2024-05-06', symptoms: 3, mood: 7, energy: 6 },
-  { date: '2024-05-13', symptoms: 5, mood: 4, energy: 3 },
-  { date: '2024-05-20', symptoms: 2, mood: 8, energy: 7 },
-  { date: '2024-05-27', symptoms: 4, mood: 6, energy: 5 },
-];
+import { loadTimelineData, TimelineDataPoint } from '@/utils/storage';
 
 const filterDataByRange = (data: TimelineDataPoint[], range: 'week' | 'month' | 'quarter'): TimelineDataPoint[] => {
   const today = new Date();
@@ -64,8 +33,15 @@ export const InteractiveTimeline = () => {
   const [selectedMetric, setSelectedMetric] = useState<'symptoms' | 'mood' | 'energy'>('symptoms');
   const [zoomLevel, setZoomLevel] = useState<'day' | 'week' | 'month'>('week');
   const [showFilters, setShowFilters] = useState(false);
+  const [allData, setAllData] = useState<TimelineDataPoint[]>(() => loadTimelineData());
 
-  const filteredData = filterDataByRange(timelineData, selectedTimeRange);
+  useEffect(() => {
+    const refresh = () => setAllData(loadTimelineData());
+    window.addEventListener('storage', refresh);
+    return () => window.removeEventListener('storage', refresh);
+  }, []);
+
+  const filteredData = filterDataByRange(allData, selectedTimeRange);
 
   const handleZoomIn = () => {
     if (zoomLevel === 'month') setZoomLevel('week');
@@ -167,8 +143,19 @@ export const InteractiveTimeline = () => {
         
         <CardContent>
           <div className="space-y-6">
+            {/* Empty state */}
+            {allData.length === 0 && (
+              <div className="h-80 flex items-center justify-center text-center">
+                <div>
+                  <Clock className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                  <p className="text-gray-500 font-medium">No timeline data yet</p>
+                  <p className="text-sm text-gray-400 mt-1">Start logging health entries to see your timeline here</p>
+                </div>
+              </div>
+            )}
+
             {/* Main Chart */}
-            <div className="h-80">
+            {allData.length > 0 && <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">
                 {selectedMetric === 'symptoms' ? (
                   <BarChart data={filteredData}>
@@ -206,8 +193,8 @@ export const InteractiveTimeline = () => {
                   </LineChart>
                 )}
               </ResponsiveContainer>
-            </div>
-            
+            </div>}
+
             {/* Pattern Insights */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Card className="bg-blue-50">

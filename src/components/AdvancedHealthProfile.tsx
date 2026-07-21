@@ -7,72 +7,13 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { User, Plus, X, Save, Heart, Activity, Target, AlertTriangle } from 'lucide-react';
+import type { AdvancedProfile, VitalSigns } from '@/types/health';
+import { loadProfile, saveProfile as saveProfileToStorage } from '@/utils/storage';
 
-interface VitalSigns {
-  bloodPressure: { systolic: number; diastolic: number };
-  heartRate: number;
-  weight: number;
-  height: number;
-  sleepHours: number;
-}
-
-interface AdvancedProfile {
-  medications: Array<{
-    name: string;
-    dosage: string;
-    frequency: string;
-    timing: string;
-  }>;
-  conditions: Array<{
-    name: string;
-    severity: 'mild' | 'moderate' | 'severe';
-    diagnosed: string;
-  }>;
-  allergies: Array<{
-    allergen: string;
-    severity: 'mild' | 'moderate' | 'severe';
-    reaction: string;
-  }>;
-  goals: Array<{
-    goal: string;
-    target: string;
-    deadline: string;
-  }>;
-  vitals: VitalSigns;
-  emergencyContact: {
-    name: string;
-    relationship: string;
-    phone: string;
-  };
-}
+export type { AdvancedProfile, VitalSigns };
 
 export const AdvancedHealthProfile = () => {
-  const [profile, setProfile] = useState<AdvancedProfile>({
-    medications: [
-      { name: 'Lisinopril', dosage: '10mg', frequency: 'Daily', timing: 'Morning' }
-    ],
-    conditions: [
-      { name: 'Hypertension', severity: 'moderate', diagnosed: '2023-01-15' }
-    ],
-    allergies: [
-      { allergen: 'Peanuts', severity: 'severe', reaction: 'Anaphylaxis' }
-    ],
-    goals: [
-      { goal: 'Improve sleep quality', target: '8 hours nightly', deadline: '2024-12-31' }
-    ],
-    vitals: {
-      bloodPressure: { systolic: 128, diastolic: 82 },
-      heartRate: 72,
-      weight: 165,
-      height: 68,
-      sleepHours: 7.5
-    },
-    emergencyContact: {
-      name: 'Sarah Johnson',
-      relationship: 'Sister',
-      phone: '(555) 123-4567'
-    }
-  });
+  const [profile, setProfile] = useState<AdvancedProfile>(() => loadProfile());
 
   const [newMedication, setNewMedication] = useState({
     name: '', dosage: '', frequency: '', timing: ''
@@ -166,6 +107,7 @@ export const AdvancedHealthProfile = () => {
   };
 
   const saveProfile = () => {
+    saveProfileToStorage(profile);
     toast({
       title: "Advanced Profile Saved",
       description: "Your comprehensive health profile has been updated"
