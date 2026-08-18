@@ -9,8 +9,10 @@ import { EnhancedMenuVision } from '@/components/EnhancedMenuVision';
 import { InteractiveTimeline } from '@/components/InteractiveTimeline';
 import { AIInsightsEngine } from '@/components/AIInsightsEngine';
 import { ReportSection } from '@/components/ReportSection';
+import { DisclaimerScreen } from '@/components/DisclaimerScreen';
 import { Activity, User, Camera, BarChart3, FileText, MessageCircle, Settings, LogOut, Menu, Bell } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
+import { hasAcceptedDisclaimer } from '@/utils/storage';
 
 type ActiveSection = 'chat' | 'menu' | 'insights' | 'reports';
 
@@ -20,10 +22,15 @@ const Index = () => {
   const [showProfile, setShowProfile] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
+  const [disclaimerAccepted, setDisclaimerAcceptedState] = useState(hasAcceptedDisclaimer());
 
   useEffect(() => {
     setIsNative(Capacitor.isNativePlatform());
   }, []);
+
+  if (!disclaimerAccepted) {
+    return <DisclaimerScreen onAccept={() => setDisclaimerAcceptedState(true)} />;
+  }
 
   const sections = [
     { 
